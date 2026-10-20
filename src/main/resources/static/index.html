@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ventas e inventario</title>
+<style>
+  :root { --bg:#f5f6f4; --card:#fff; --ink:#1d2421; --muted:#667069; --line:#dde1dc; --accent:#1f6f5c; --danger:#b3382c; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Segoe UI", system-ui, sans-serif; background:var(--bg); color:var(--ink); }
+  header { background:var(--accent); color:#fff; padding:14px 24px; font-size:1.2rem; font-weight:600; }
+  nav { display:flex; gap:4px; padding:12px 24px 0; border-bottom:1px solid var(--line); background:var(--card); }
+  nav button { border:0; background:none; padding:10px 18px; font-size:1rem; cursor:pointer; color:var(--muted); border-bottom:3px solid transparent; }
+  nav button.on { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+  main { max-width:960px; margin:0 auto; padding:20px; }
+  section { display:none; } section.on { display:block; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:16px; margin-bottom:16px; }
+  h2 { margin:0 0 12px; font-size:1.1rem; }
+  form, .fila { display:flex; flex-wrap:wrap; gap:10px; align-items:end; }
+  label { display:flex; flex-direction:column; font-size:.85rem; color:var(--muted); gap:4px; }
+  input, select { padding:8px 10px; border:1px solid var(--line); border-radius:4px; font-size:1rem; min-width:120px; }
+  button.btn { padding:9px 16px; border:0; border-radius:4px; background:var(--accent); color:#fff; font-size:1rem; cursor:pointer; }
+  button.sec { background:#e8ebe7; color:var(--ink); }
+  button.del { background:var(--danger); }
+  button.sm { padding:5px 10px; font-size:.85rem; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+  th { font-size:.85rem; color:var(--muted); font-weight:600; }
+  td.num, th.num { text-align:right; }
+  .vacio { color:var(--muted); padding:12px 0; }
+  .total { font-size:1.3rem; font-weight:600; text-align:right; margin-top:12px; }
+  .bajo { color:var(--danger); font-weight:600; }
+  #msg { position:fixed; right:20px; bottom:20px; padding:12px 18px; border-radius:6px; color:#fff; display:none; max-width:360px; }
+  #msg.ok { background:var(--accent); display:block; } #msg.err { background:var(--danger); display:block; }
+</style>
+</head>
+<body>
+<header>Ventas e inventario</header>
+<nav>
+  <button class="on" data-tab="productos">Productos</button>
+  <button data-tab="vender">Vender</button>
+  <button data-tab="ventas">Historial de ventas</button>
+</nav>
+
+<main>
+  <!-- PRODUCTOS -->
+  <section id="productos" class="on">
+    <div class="card">
+      <h2 id="tituloForm">Nuevo producto</h2>
+      <form id="formProducto">
+        <input type="hidden" id="pId">
+        <label>Código <input id="pCodigo" required></label>
+        <label>Nombre <input id="pNombre" required></label>
+        <label>Precio <input id="pPrecio" type="number" step="0.01" min="0.01" required></label>
+        <label>Stock <input id="pStock" type="number" min="0" required></label>
+        <button class="btn" type="submit">Guardar</button>
+        <button class="btn sec" type="button" id="btnCancelar">Cancelar</button>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Inventario</h2>
+      <table>
+        <thead><tr><th>ID</th><th>Código</th><th>Nombre</th><th class="num">Precio</th><th class="num">Stock</th><th></th></tr></thead>
+        <tbody id="tbProductos"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- VENDER -->
+  <section id="vender">
+    <div class="card">
+      <h2>Nueva venta</h2>
+      <div class="fila">
+        <label>Producto <select id="vProducto"></select></label>
+        <label>Cantidad <input id="vCantidad" type="number" min="1" value="1"></label>
+        <button class="btn" id="btnAgregar">Agregar</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Detalle</h2>
+      <table>
+        <thead><tr><th>Producto</th><th class="num">Cantidad</th><th class="num">Precio</th><th class="num">Subtotal</th><th></th></tr></thead>
+        <tbody id="tbCarrito"></tbody>
+      </table>
+      <div class="total">Total: <span id="total">0.00</span></div>
+      <div style="text-align:right; margin-top:12px">
+        <button class="btn sec" id="btnVaciar">Vaciar</button>
+        <button class="btn" id="btnVender">Registrar venta</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- HISTORIAL -->
+  <section id="ventas">
+    <div class="card">
+      <h2>Ventas registradas</h2>
+      <table>
+        <thead><tr><th>ID</th><th>Fecha</th><th>Productos</th><th class="num">Total</th></tr></thead>
+        <tbody id="tbVentas"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<div id="msg"></div>
+
+<script>
+const API = "/api";           // misma dirección del servidor, no hay problema de CORS
+let productos = [];
+let carrito = [];             // { productoId, nombre, precio, cantidad }
+
+const $ = id => document.getElementById(id);
+const money = n => Number(n).toFixed(2);
+
+function aviso(texto, tipo = "ok") {
+  const m = $("msg");
+  m.textContent = texto; m.className = tipo;
+  setTimeout(() => m.className = "", 3500);
+}
+
+// Llama a la API y convierte los errores del backend en un mensaje legible
+async function llamar(url, opciones = {}) {
+  const r = await fetch(API + url, {
+    headers: { "Content-Type": "application/json" },
+    ...opciones
+  });
+  if (r.status === 204) return null;
+  const datos = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const msg = datos.error || Object.values(datos).join(" | ") || "Error " + r.status;
+    throw new Error(msg);
+  }
+  return datos;
+}
+
+// ---------- Pestañas ----------
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button, section").forEach(e => e.classList.remove("on"));
+  b.classList.add("on");
+  $(b.dataset.tab).classList.add("on");
+  if (b.dataset.tab === "ventas") cargarVentas();
+  if (b.dataset.tab === "vender") cargarProductos();
+});
+
+// ---------- PRODUCTOS (CRUD) ----------
+async function cargarProductos() {
+  try {
+    productos = await llamar("/productos");
+    pintarProductos();
+    pintarSelect();
+  } catch (e) { aviso(e.message, "err"); }
+}
+
+function pintarProductos() {
+  const tb = $("tbProductos");
+  if (!productos.length) { tb.innerHTML = '<tr><td colspan="6" class="vacio">No hay productos. Crea el primero con el formulario.</td></tr>'; return; }
+  tb.innerHTML = productos.map(p => `
+    <tr>
+      <td>${p.id}</td><td>${p.codigo ?? ""}</td><td>${p.nombre}</td>
+      <td class="num">${money(p.precio)}</td>
+      <td class="num ${p.stock <= 3 ? "bajo" : ""}">${p.stock}</td>
+      <td class="num">
+        <button class="btn sm" onclick="editar(${p.id})">Editar</button>
+        <button class="btn sm del" onclick="eliminar(${p.id})">Eliminar</button>
+      </td>
+    </tr>`).join("");
+}
+
+$("formProducto").onsubmit = async e => {
+  e.preventDefault();
+  const id = $("pId").value;
+  const cuerpo = {
+    codigo: $("pCodigo").value.trim(),
+    nombre: $("pNombre").value.trim(),
+    precio: parseFloat($("pPrecio").value),
+    stock: parseInt($("pStock").value)
+  };
+  try {
+    if (id) await llamar("/productos/" + id, { method: "PUT", body: JSON.stringify(cuerpo) });
+    else    await llamar("/productos",       { method: "POST", body: JSON.stringify(cuerpo) });
+    aviso(id ? "Producto actualizado" : "Producto creado");
+    limpiarForm();
+    cargarProductos();
+  } catch (e) { aviso(e.message, "err"); }
+};
+
+function editar(id) {
+  const p = productos.find(x => x.id === id);
+  $("pId").value = p.id; $("pCodigo").value = p.codigo ?? "";
+  $("pNombre").value = p.nombre; $("pPrecio").value = p.precio; $("pStock").value = p.stock;
+  $("tituloForm").textContent = "Editar producto " + p.id;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function eliminar(id) {
+  if (!confirm("¿Eliminar el producto " + id + "?")) return;
+  try {
+    await llamar("/productos/" + id, { method: "DELETE" });
+    aviso("Producto eliminado");
+    cargarProductos();
+  } catch (e) { aviso(e.message, "err"); }
+}
+
+function limpiarForm() {
+  $("formProducto").reset(); $("pId").value = "";
+  $("tituloForm").textContent = "Nuevo producto";
+}
+$("btnCancelar").onclick = limpiarForm;
+
+// ---------- VENDER ----------
+function pintarSelect() {
+  $("vProducto").innerHTML = productos.map(p =>
+    `<option value="${p.id}">${p.nombre} (stock ${p.stock})</option>`).join("");
+}
+
+$("btnAgregar").onclick = () => {
+  const p = productos.find(x => x.id == $("vProducto").value);
+  const cant = parseInt($("vCantidad").value);
+  if (!p) return aviso("Selecciona un producto", "err");
+  if (!cant || cant < 1) return aviso("La cantidad debe ser mayor a 0", "err");
+
+  const enCarrito = carrito.find(c => c.productoId === p.id);
+  const totalPedido = cant + (enCarrito ? enCarrito.cantidad : 0);
+  if (totalPedido > p.stock) return aviso(`Stock insuficiente. Disponible: ${p.stock}`, "err");
+
+  if (enCarrito) enCarrito.cantidad = totalPedido;
+  else carrito.push({ productoId: p.id, nombre: p.nombre, precio: p.precio, cantidad: cant });
+  pintarCarrito();
+};
+
+function pintarCarrito() {
+  const tb = $("tbCarrito");
+  if (!carrito.length) { tb.innerHTML = '<tr><td colspan="5" class="vacio">Agrega productos para empezar la venta.</td></tr>'; $("total").textContent = "0.00"; return; }
+  let total = 0;
+  tb.innerHTML = carrito.map((c, i) => {
+    const sub = c.precio * c.cantidad; total += sub;
+    return `<tr><td>${c.nombre}</td><td class="num">${c.cantidad}</td><td class="num">${money(c.precio)}</td>
+      <td class="num">${money(sub)}</td>
+      <td class="num"><button class="btn sm del" onclick="quitar(${i})">Quitar</button></td></tr>`;
+  }).join("");
+  $("total").textContent = money(total);
+}
+function quitar(i) { carrito.splice(i, 1); pintarCarrito(); }
+$("btnVaciar").onclick = () => { carrito = []; pintarCarrito(); };
+
+$("btnVender").onclick = async () => {
+  if (!carrito.length) return aviso("La venta no tiene productos", "err");
+  const cuerpo = { items: carrito.map(c => ({ productoId: c.productoId, cantidad: c.cantidad })) };
+  try {
+    const v = await llamar("/ventas", { method: "POST", body: JSON.stringify(cuerpo) });
+    aviso(`Venta #${v.id} registrada. Total: ${money(v.total)}`);
+    carrito = []; pintarCarrito();
+    cargarProductos();       // refresca el stock descontado
+  } catch (e) { aviso(e.message, "err"); }
+};
+
+// ---------- HISTORIAL ----------
+async function cargarVentas() {
+  try {
+    const ventas = await llamar("/ventas");
+    const tb = $("tbVentas");
+    if (!ventas.length) { tb.innerHTML = '<tr><td colspan="4" class="vacio">Todavía no hay ventas registradas.</td></tr>'; return; }
+    tb.innerHTML = ventas.slice().reverse().map(v => `
+      <tr><td>${v.id}</td><td>${(v.fecha || "").replace("T", " ").slice(0, 16)}</td>
+      <td>${(v.detalles || []).map(d => `${d.cantidad} x ${d.nombreProducto}`).join(", ")}</td>
+      <td class="num">${money(v.total)}</td></tr>`).join("");
+  } catch (e) { aviso(e.message, "err"); }
+}
+
+cargarProductos();
+pintarCarrito();
+</script>
+</body>
+</html>
